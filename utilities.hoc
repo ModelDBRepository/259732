@@ -1,0 +1,616 @@
+	objref fTuning,fSyn, fTuningDend,fDend,dendsave,fInput,inputsave,ftraces,somaMat,dendMat,inputMat,spikeMat
+	objref outputMat,somasave,casave, vecmean,vecSD,f2
+
+	strdef basename
+	
+	func checkNMDAspike(){//measures how many NMDA spikes were present
+		spike=0
+		duration=30
+		amp=-30
+		for dend=0,Input_numberDend-1{//all active dends
+			if(dendV[dend].max>amp){//examine only where there is chance for a spike
+				first=-1
+				for tt=0,dendV[dend].size()-2{
+					if ((dendV[dend].x[tt]<=amp)&&(dendV[dend].x[tt+1]>amp)){first=tt}//positive cross
+					if ((dendV[dend].x[tt]>amp)&&(dendV[dend].x[tt+1]<=amp)){//negative cross
+						if(tt-first>duration/dt){ spike+=1 first=tt }
+					}	
+				}
+				if((tt-first>duration/dt)&&(first>=0)&&(dendV[dend].x[dendV[dend].size()-2]>amp)){spike+=1 }
+			}
+		}
+		//print spike
+		return spike
+	}
+	
+	func CalcPreSynInput(){//measures the total input
+		InputCount=0
+		for i=0,SynList.count()-1{
+			InputCount+=StimTimeVec[i].sum()//-TimeVec[i].sum(0,100)
+		}
+		return InputCount
+	}
+	proc saveRun(){//saves the current run
+		objref f1
+		f1=new File()
+		f1.wopen("ampSomaV.dat")	
+
+		run()	
+		for i=0,somav.size()-1{
+			f1.printf("%g\n",somav.x[i])	
+		}			
+		f1.close()	
+		checkNMDAspike()		
+	}
+	proc TestRun(){	//runs $1 times and saves the number of APs
+		avg_firing=0
+		spikes=0
+		if($1>0){
+			for rep=1,$1{
+				PlaceSyn()			 
+				Update()
+				run()
+				avg_firing+=somaAP.size()/$1
+				spikes+=(somaAP.size()>0)
+			}
+		}
+		print avg_firing,spikes
+	}
+	//------runs over different sim parameters
+ 	proc RunsimOutput(){
+			//$1-angles, $2-num trials, $3 type (1: num inputs,2:DSI,3:num bias inputs,4:noise levels)
+		objref f1,fSpike,f2,fInput
+		f1=new File()
+		f2=new File()
+		fSpike=new File()			
+		fInput=new File()			
+		sprint(filename,"out_%s_%d_%d.dat",GF,Input_NOISE_type,$3)
+		f1.wopen(filename)	
+		sprint(filename,"out_Dend_%s_%d_%d.dat",GF,Input_NOISE_type,$3)
+		f2.wopen(filename)
+		sprint(filename,"out_SPIKE_%s_%d_%d.dat",GF,Input_NOISE_type,$3)	
+		fSpike.wopen(filename)	
+		sprint(filename,"out_Input_%s_%d_%d.dat",GF,Input_NOISE_type,$3)	
+		fInput.wopen(filename)		
+		NumAngles=$1
+		RandObj.ACG(randomseed)
+		//for numInput=0,20{
+		saveAM=	Input_AM	
+		saveDM=	Input_DM	
+		saveCE=	Input_CE	
+		saveORTH=	OrthogonalNoise_Level	
+		saveSIGNAL=	Input_AngleStableSD			
+			
+		for trial=0,$2{
+			print "trial ",trial
+			//Input_numberGlobalSynapses=(20+numInput*20)*(Sim_Global==1)*(CellNum*2-1)//20+420//20
+				//Input_numberGlobalSynapses=(100+numInput*50)*(Sim_Global==1)*CellNum//20+420//20
+			//Input_numberFocalSynapses=(numInput*1)*(Sim_Global==0)*(1+(layer5dend1)*3)//*(1+insertHHdend*2)*(Sim_Global==0)//+22
+				//Input_numberFocalSynapses=(5+numInput*1)*(Sim_Global==0)//*(1+insertHHdend*2)*(Sim_Global==0)//+22
+			//PlaceSyn()	
+			if($3==1){//-------------num inputs
+				Input_numberFocalSynapses=(5+trial*1)*(Sim_Global==0)-(CellNum==2)*2
+				if(Voff_glutamate){
+					Input_numberFocalSynapses=(20+trial*20)*(Sim_Global==0)
+				}
+				if((layer5dend1)&&(CellNum==2)){
+					Input_numberFocalSynapses=5+trial*5
+				}
+				Input_numberGlobalSynapses=(20+trial*20)*(Sim_Global==1)//*(CellNum*2-1)//20+420//20
+			}
+		
+			if($3==2){//--------------dsi change
+				Input_DSI=trial/($2)
+			}
+			if($3==3){//--------------bias
+				tstop=500
+				Input_Center=300
+				Input_biasnumberSynapses=trial*20
+				Input_biasGABAnumberSynapses=int(Input_biasnumberSynapses/5)
+			}
+			if($3==4){//--------------noise levels
+				Input_AM=trial*saveAM/($2/2)
+				Input_DM=trial*saveDM/($2/2)
+				Input_CE=trial*saveCE/($2/2)
+				OrthogonalNoise_Level=trial*saveORTH/($2/2)
+				Input_AngleStableSD=trial*saveSIGNAL/($2/2)	
+				
+			}	
+			noise_level=Input_AM+	Input_DM+	Input_CE+	OrthogonalNoise_Level+Input_AngleStableSD
+			//Input_AM=numInput/10
+			//Input_DM=numInput/20*90
+			//Update_DStuningTable(0)
+			//print Input_DSI
+			PlaceSyn() 
+			Update() 
+			//Update_DStuningTable(randomseed)
+		//--------------dsi change
+			for countRS=0,InputRepeats-1{
+				Update_DStuningTable(countRS)
+				for repPer_Input=1,Sim_repeatsPer_Input{//repeat over input configurations
+					//f1.printf("%g	%d	%d	",Input_AM,countRS,Input_numberFocalSynapses+Input_numberGlobalSynapses)
+					f1.printf("%d	%d	%d	%g	%d	%g	",trial,countRS,Input_numberFocalSynapses+Input_numberGlobalSynapses,Input_DSI,Input_biasnumberSynapses+Input_biasGABAnumberSynapses,noise_level)
+					f2.printf("%d	%d	%d	%g	%d	%g	",trial,countRS,Input_numberFocalSynapses+Input_numberGlobalSynapses,Input_DSI,Input_biasnumberSynapses+Input_biasGABAnumberSynapses,noise_level)
+					fSpike.printf("%d	%d	%d	%g	%d	%g	",trial,countRS,Input_numberFocalSynapses+Input_numberGlobalSynapses,Input_DSI,Input_biasnumberSynapses+Input_biasGABAnumberSynapses,noise_level)
+					fInput.printf("%d	%d	%d	%g	%d	%g	",trial,countRS,Input_numberFocalSynapses+Input_numberGlobalSynapses,Input_DSI,Input_biasnumberSynapses+Input_biasGABAnumberSynapses,noise_level)
+					//PlaceSyn()
+					for ang=0,NumAngles-1{
+						Input_Angle=int(ang*360/NumAngles)
+						Update()
+						run()	
+						maxtime=(Input_Center+150)/dt
+						if(maxtime>dendV[0].size()-1){maxtime=dendV[0].size()-1}						
+						if(insertHH){
+							count=0
+							for i=0,somaAP.size()-1{
+								count+=((somaAP.x[i]>=Input_Center))//&&(somaAP.x[i]<(Input_Center+150)))
+							}
+							f1.printf("%d	", count)//somaAP.size())
+						}else{
+							f1.printf("%g	", somav.max(Input_Center/dt,maxtime)-somav.min(Input_Center/dt/2,Input_Center/dt))
+						}
+						fSpike.printf("%d	",checkNMDAspike())
+						fInput.printf("%d	",CalcPreSynInput())
+						f2.printf("%g	", dendV[0].mean(Input_Center/dt,maxtime))	
+					}						
+					f1.printf("\n")
+					f2.printf("\n")
+					fSpike.printf("\n")
+					fInput.printf("\n")
+				}
+			}					
+		}
+		f1.close()
+		f2.close()
+		fSpike.close()	
+		fInput.close()	
+		quit()		
+	}
+	
+	proc ReportBias(){
+		for trial=0,$1{
+			//print "trial ",trial
+
+			tstop=300
+			Input_Center=300
+			Input_biasnumberSynapses=trial*20
+			Input_biasGABAnumberSynapses=int(Input_biasnumberSynapses/5)
+			//  
+			PlaceSyn()  
+			Update()
+			run()	
+			print somav.mean()-somav.min()			
+		}
+	}
+	
+	//---makes an example - tuning curve, 10 PD,10 ND responses
+	proc RunsimExample10(){
+		objref f1,fSpike,fTuningDend,fDend,dendsave,fInput,inputsave
+		fTuning=new File()
+		f1=new File()
+		fSpike=new File()
+		fSyn=new File()
+		fTuningDend=new File()
+		fDend=new File()
+		fInput=new File()
+		
+		//randomseed=0
+		//tuning
+		sprint(basename,"%s_%g.dat",GF,Input_NOISE_type)
+		sprint(filename,"Tuning_%s",basename)
+		fTuning.wopen(filename)	
+		sprint(filename,"Spike_%s",basename)	
+		fSpike.wopen(filename)
+		sprint(filename,"Synapses_%s",basename)	
+		fSyn.wopen(filename)
+		//examples
+		sprint(filename,"Example_%s",basename)
+		f1.wopen(filename)	
+		sprint(filename,"Tuning_Dend_%s",basename)
+		fTuningDend.wopen(filename)	
+		sprint(filename,"Example_Dend_%s",basename)
+		fDend.wopen(filename)
+		sprint(filename,"Input_%s",basename)
+		fInput.wopen(filename)
+		
+		somasave=new Matrix(tstop/dt+1,20)
+		dendsave=new Matrix(tstop/dt+1,20*Input_numberDend)
+		dendsave.muls(0)
+		inputsave=new Matrix(SynList.count()+BiasList.count(),23)
+		countPD=0
+		NumAngles=2
+		
+//print "hr"
+
+		
+		//Update_DStuningTable(05)//4
+		for ang=0,NumAngles-1{
+			mean_spike_out=0
+			for rep=1,10{
+				Input_Angle=int(ang*360/NumAngles)//+RandObj.normal(0,Input_AngleStableSD^2))
+				//while(Input_Angle<0){Input_Angle+=360}
+				//while(Input_Angle>=360){Input_Angle-=360}
+				
+				countRS=rep/2+countPD/100+(CellNum-1)//024+rep*2//rep*5+5+Sim_Global*10
+				PlaceSyn()	
+				 
+				Update()
+				run()
+					
+				if(insertHH){
+					counter=0
+					for i=0,somaAP.size()-1{
+						counter+=((somaAP.x[i]>Input_Center)&&(somaAP.x[i]<(Input_Center+150)))
+					}
+					fTuning.printf("%d	", counter)//somaAP.size())
+					mean_spike_out+=counter
+//print Input_Angle,somaAP.size(),mean_spike_out
+				}else{
+					fTuning.printf("%g	", somav.max()-somav.min())
+				}
+				maxtime=(Input_Center+150)/dt
+				if(maxtime>dendV[0].size()-1){maxtime=dendV[0].size()-1}
+
+				for dend=0,Input_numberDend-1{
+					fTuningDend.printf("%g	", dendV[dend].mean(Input_Center/dt,maxtime)-dendV[dend].min())
+				}
+				fSpike.printf("%d	",checkNMDAspike())	
+				
+				if(((ang==0)||(ang==NumAngles/2))){//PD ND
+					for in=0,SynList.count()-1{//---inputs
+						inputsave.x[in][rep+(ang>0)*10+2]=StimTimeVec[in].sum()
+						inputsave.x[in][0]=SynList.o(in).locx
+						inputsave.x[in][01]=SynList.o(in).locy
+						inputsave.x[in][02]=0//signal
+					}
+					for in=0,BiasList.count()-1{//---inputs
+						inputsave.x[in+SynList.count()][rep+(ang>0)*10+2]=BiasTimeVec[in].sum()
+						inputsave.x[in+SynList.count()][0]=BiasList.o(in).locx
+						inputsave.x[in+SynList.count()][01]=BiasList.o(in).locy
+						inputsave.x[in+SynList.count()][02]=1+(in<Input_biasnumberSynapses)//bias
+					}
+					
+					for i=0,somav.size()-1{//----voltages
+						somasave.x[i][countPD]=somav.x[i]
+						
+						for dend=0,Input_numberDend-1{
+							dendsave.x[i][countPD+dend*20]=dendV[dend].x[i] 
+						}						
+					}
+					countPD+=1
+					//if(rep==1){
+					for i=0,SynList.count()-1{
+						for tt=0,TimeVec[i].size()-1{
+							fSyn.printf("%d	%d	%d	%d	%g	%g\n",rep,ang,0,i,tt, TimeVec[i].x[tt])
+							
+						}
+					}	
+					for i=0,BiasList.count()-1{
+						for tt=0,BiasTimeVec[i].size()-1{
+							fSyn.printf("%d	%d	%d	%d	%g	%g\n",rep,ang,1,i,tt, BiasTimeVec[i].x[tt])	
+						}
+					}
+					//}
+				}
+			}
+print "angle, mean firing: ",Input_Angle,mean_spike_out/10
+			fTuning.printf("\n")
+			fTuningDend.printf("\n")
+			fSpike.printf("\n")
+		}
+		somasave.fprint(0,f1,"%-8g\t")
+		dendsave.fprint(0,fDend,"%-8g\t")
+		inputsave.fprint(0,fInput,"%-8g\t")
+		f1.close()
+		fSpike.close()	
+		fTuning.close()	
+		fTuningDend.close()	
+		fDend.close()	
+		fSyn.close()
+		fInput.close()
+		//quit()		
+	}
+			
+	//---saves layered information
+proc savewithheader(){//1 matrix,2 inputs,3 data
+	$o1.x[0][0]=-1
+	$o1.x[0][01]=-1
+	$o1.x[01][0]=-1
+	$o1.x[01][01]=-1
+	$o1.x[countRS*Sim_repeatsPer_Input+repPer_Input+2][0]=countRS
+	$o1.x[countRS*Sim_repeatsPer_Input+repPer_Input+2][1]=repPer_Input
+	$o1.x[0][ang+2+$2*NumAngles]=Input_Angle
+	$o1.x[1][ang+2+$2*NumAngles]=Input_numberFocalSynapses+Input_numberGlobalSynapses
+	$o1.x[2][ang+2+$2*NumAngles]=LayerNum
+	$o1.x[countRS*Sim_repeatsPer_Input+repPer_Input+2][ang+2+$2*NumAngles]=$3
+	//print ($4-1)*NumAngles+$5+2+$6*NumAngles*maxLayers
+	//somaMat.x[countRS*Sim_repeatsPer_Input+repPer_Input-1][(LayerNum-1)*NumAngles+ang+2]= $5
+}
+
+proc RunsimLayers(){//for ($1;<$2;+$3)-number inputs L1;($4;<$5;+$6)-number inputs L2; $7/$8 L1/L2 is linear (global distribution)
+		objref f1,fInput,f2
+		f1=new File()	
+		f2=new File()	
+		fInput=new File()
+		
+		//---first generation
+		for (layer1=$1;layer1<=$2;layer1+=$3){
+			for (Input_Angle=0;Input_Angle<=180;Input_Angle+=180){
+				Sim_Read_File=0
+				sprint(filename,"Layers/l1_out_%d_%d_%g_%d.dat",$7,layer1,Input_Angle ,Input_NOISE_type)
+				sprint(filename_1,"Layers/l1_to_l2_%d_%d_%g_%d.dat",$7,layer1,Input_Angle ,Input_NOISE_type)
+				fInput.ropen(filename)
+				print "LAYER 1 ", filename
+				if(fInput.isopen()==0){	//layer 1 run is not complete
+					fInput.wopen(filename)
+					Input_numberFocalSynapses=($7==0)*layer1
+					Input_numberGlobalSynapses=($7)*layer1
+					tstop=500
+					PlaceSyn()
+					somasave=new Matrix(Sim_repeatsPer_Input*InputRepeats,tstop)
+					somasave.muls(0)					
+					f1.wopen(filename_1)				
+					for trials=1,Sim_repeatsPer_Input*InputRepeats{
+						Update()
+						run()
+						fInput.printf("%d\n", somaAP.size())
+						for i=0,somaAP.size()-1{
+							somasave.x[trials-1][int(somaAP.x[i])]=1	//spike timing for each run
+						}	
+					}
+					somasave.fprint(f1)
+					f1.close()
+				}
+				fInput.close()
+				//---second generation
+				for (layer2=$4;layer2<=$5;layer2+=$6){
+					Sim_Read_File=1
+					outinMat=new Matrix()
+					fInput.ropen(filename_1)
+					outinMat.scanf(fInput)
+					fInput.close()
+					Input_numberFocalSynapses=($8==0)*layer2
+					Input_numberGlobalSynapses=($8)*layer2
+					PlaceSyn()
+					sprint(filename,"Layers/l2_out_%d_%d_%d_%g_%d.dat",layer1,$8,layer2,Input_Angle ,Input_NOISE_type)
+					f2.wopen(filename)
+					print "LAYER 2 READ ", filename_1, " WRITE ",filename
+					for trials=1,Sim_repeatsPer_Input*InputRepeats{
+						Update()
+						run()
+						f2.printf("%d\n", somaAP.size())
+					}
+					f2.close()
+	
+				}//---layer 2
+				
+			}
+		}
+		
+		
+/*/		
+		Presynaptic_inputs=Input_numberFocalSynapses+Input_numberGlobalSynapses
+		for (Presynaptic_inputs=10*(Sim_Global_L1==0)+150*(Sim_Global_L1==1);Presynaptic_inputs<=14*(Sim_Global_L1==0)+400*(Sim_Global_L1==1);Presynaptic_inputs+=1*(Sim_Global_L1==0)+50*(Sim_Global_L1==1)){
+		//for (Presynaptic_inputs=12*(Sim_Global_L1==0)+150*(Sim_Global_L1==1);Presynaptic_inputs<=14*(Sim_Global_L1==0)+400*(Sim_Global_L1==1);Presynaptic_inputs+=1*(Sim_Global_L1==0)+50*(Sim_Global_L1==1)){
+			
+			fInput.wopen(filename)				
+			maxLayers=2
+			NumpostInputs=8
+			LayerNum=1
+			somaMat=new Matrix(Sim_repeatsPer_Input*InputRepeats+3,NumAngles*(NumpostInputs+1)+2)
+			dendMat=new Matrix(Sim_repeatsPer_Input*InputRepeats+3,NumAngles*(NumpostInputs+1)+2)
+			inputMat=new Matrix(Sim_repeatsPer_Input*InputRepeats+3,NumAngles*(NumpostInputs+1)+2)
+			spikeMat=new Matrix(Sim_repeatsPer_Input*InputRepeats+3,NumAngles*(NumpostInputs+1)+2)
+			somaMat.muls(0)
+			dendMat.muls(0)
+			inputMat.muls(0)
+			spikeMat.muls(0)
+			Input_numberFocalSynapses=(Presynaptic_inputs)*(Sim_Global_L1==0)
+			Input_numberGlobalSynapses=(Presynaptic_inputs)*(Sim_Global_L1==1)
+
+			somasave=new Matrix(Sim_repeatsPer_Input*InputRepeats,tstop)
+			
+			Sim_Read_File=0
+			PlaceSyn()	
+			if($2==1){//do first layer
+				for ang=0,NumAngles-1{
+					Input_Angle=int(ang*360/NumAngles)	
+					sprint(filename,"Layers/in%s_%g_%g_%g_%g.dat",Read_File_st,Presynaptic_inputs,Input_Angle ,Input_NOISE_type,LayerNum)
+					ftraces.wopen(filename)	
+					somasave.muls(0)				
+					for countRS=0,InputRepeats-1{
+						for repPer_Input=1,Sim_repeatsPer_Input{//repeat over input configurations				
+					
+							Update()
+							run()
+							count=0
+							for i=0,somaAP.size()-1{
+								count+=((somaAP.x[i]>Input_Center)&&(somaAP.x[i]<(Input_Center+150)))
+								somasave.x[countRS*Sim_repeatsPer_Input+repPer_Input-1][int(somaAP.x[i])]=1
+							}		
+							maxtime=(Input_Center+150)/dt
+							if(maxtime>dendV[0].size()-1){maxtime=dendV[0].size()-1}						
+							savewithheader(somaMat,0,count)	
+							savewithheader(dendMat,0, dendV[0].mean(Input_Center/dt,maxtime))	
+							savewithheader(inputMat,0,CalcPreSynInput())	
+							savewithheader(spikeMat,0,checkNMDAspike())	
+						}
+					}
+					somasave.fprint(ftraces)
+					ftraces.close()					
+				}
+			}
+			
+			startInput=6*(Sim_Global==0)+100*(Sim_Global==1)
+			addInput=1*(Sim_Global==0)+50*(Sim_Global==1)
+			LayerNum=2
+			for	inputs=0,NumpostInputs-1{
+				Input_numberFocalSynapses=(startInput+addInput*inputs)*(Sim_Global==0)
+				Input_numberGlobalSynapses=(startInput+addInput*inputs)*(Sim_Global==1)
+				Sim_Read_File=1
+				PlaceSyn()		
+				for ang=0,NumAngles-1{
+					Input_Angle=int(ang*360/NumAngles)
+					// 
+						
+					for countRS=0,InputRepeats-1{
+						for repPer_Input=1,Sim_repeatsPer_Input{//repeat over input configurations
+							Update()
+							run()
+							count=0
+							for i=0,somaAP.size()-1{
+								count+=((somaAP.x[i]>Input_Center)&&(somaAP.x[i]<(Input_Center+150)))
+							}
+							maxtime=(Input_Center+150)/dt
+							if(maxtime>dendV[0].size()-1){maxtime=dendV[0].size()-1}						
+							
+							savewithheader(somaMat,inputs+1,count)	
+							savewithheader(dendMat,inputs+1, dendV[0].mean(Input_Center/dt,maxtime))	
+							savewithheader(inputMat,inputs+1,CalcPreSynInput())	
+							savewithheader(spikeMat,inputs+1,checkNMDAspike())										
+						}					
+					}	
+
+				}
+			}
+			somaMat.fprint(0,f1,"%-8g\t")
+			f1.close()
+			dendMat.fprint(0,f2,"%-8g\t")
+			inputMat.fprint(0,fInput,"%-8g\t")
+			spikeMat.fprint(0,fSpike,"%-8g\t")
+			f2.close()
+			fSpike.close()
+			fInput.close()
+			
+		}
+		/*/
+		//quit()
+	}		
+
+	//*/
+	proc print_tuning_input(){//prints the tuning of the input to different directions 
+		objref f1
+		f1=new File()
+		f1.wopen("input.dat")
+		//Input_DM=00
+		//Input_AngleSD=0
+		//Input_AM=3
+		for rep=1,100{
+			for ang=0,7{
+				Input_Angle=ang*45
+				Update()			
+				for i=0,SynList.count()-1{
+					f1.printf("%g	",StimTimeVec[i].sum())
+				}
+				f1.printf("\n") 
+			}
+		}
+		f1.close()
+		quit()		
+	}
+	
+	proc morph(){//saves the morphology of the cell, synaptic inputs and timing
+		objref f1
+		f1=new File()
+		f1.wopen("morph.dat")
+		forall {
+			for i=0,n3d()-1{
+				f1.printf("%g	%g\n", x3d(i),y3d(i))
+			} 
+			f1.printf(" 	 \n")  
+		}
+		f1.close()
+		f1.wopen("syn.dat")
+		for i=0,SynList.count()-1{
+			f1.printf("%g	%g\n", SynList.o(i).locx,SynList.o(i).locy)
+		}
+		for i=0,BiasList.count()-1{
+			f1.printf("%g	%g\n", BiasList.o(i).locx,BiasList.o(i).locy)
+		}		
+		f1.close()
+		f1.wopen("inputs.dat")
+		for i=0,NetEventList.count()-1{
+			//f1.printf("%g	", NetEventList.o(i).size())
+			for tt=0,NetEventList.o(i).size()-1{
+				f1.printf("%g	", NetEventList.o(i).x[tt])
+			}
+			f1.printf("\n")
+		}
+		f1.close()		
+	}
+	
+	proc Corr(){//saves the correlations in synaptic inputs 
+		objref f1
+		f1=new File()
+		f1.wopen("corr.dat")
+		Input_Angle=180//90
+		//Input_AngleInitSD=0
+		PlaceSyn()	
+		tstop=1		 
+		run()
+		NumAngles=8	
+		NoiseLevels=10//10
+		NumInputs=SynList.count()
+		Repeats=250
+		outputMat=new Matrix(NumInputs*(NoiseLevels+1)*Repeats,NumAngles+4)
+		//print outputMat.ncol(),outputMat.nrow()
+		count=0
+		for noise=0,NoiseLevels{
+			Input_AM=((2^(1/3)*(noise/NoiseLevels))^3)//*.001//----G
+			Input_DM=0//90*(noise/NoiseLevels)//*.5
+			for rep=0,Repeats-1{
+				for ang=0,NumAngles-1{
+					Input_Angle=int(ang*360/NumAngles)
+					Update()
+					run()
+					//print ang+1,count
+					for i=0,NumInputs-1{
+						outputMat.x[count+i][ang+4]=noiseVec.x[i]//StimTimeVec[i].sum()
+						outputMat.x[count+i][0]=noise
+						outputMat.x[count+i][1]=i
+						outputMat.x[count+i][2]=rep
+						outputMat.x[count+i][3]=Input_DM+Input_AM
+					}
+				}
+				count+=NumInputs
+				
+			}
+			print count,noise
+		}
+		outputMat.fprint(0,f1,"%-8g\t")
+		f1.close()	
+		quit()
+	}
+
+	proc NoiseFunc(){//saves the correlations in synaptic inputs 
+		objref f1
+		f1=new File()
+		f1.wopen("noise.dat")
+		Input_numberGlobalSynapses=121
+		Input_Background=0
+		PlaceSyn()
+		//run()
+		NumAngles=1		
+		tstop=2
+		for ang=1,20{
+			Input_Angle=0180//ang*180
+		
+			Update()
+			//f1.printf("%g\n", StimTimeVec[1].sum())
+			//f1.printf("%g\n", noiseVec.x[0])
+			//run()
+			//for i=01,120{
+			for i=1,120{			
+				f1.printf("%g	", StimTimeVec[i].sum())
+				//f1.printf("%g	", NetEventList.o(i).size())
+			}
+			f1.printf("\n")
+
+		}
+			for i=1,120{
+				f1.printf("%g	", DStuningPD.x[i])
+			}
+		//	f1.printf("\n")		
+		f1.close()	
+		quit()
+	}	

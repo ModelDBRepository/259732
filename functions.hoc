@@ -1,0 +1,355 @@
+	use_mcell_ran4(1)
+	tstop=500
+	dt = 0.1	
+	v_init=-60	
+	steps_per_ms = 10	
+
+	cell=new celltemplate(0,0)
+	
+	//---different parameters of the simulation
+	
+	Sim_repeatsPer_Input=100		//---number of trials in a repeat
+	InputRepeats=10					//---number of repeats with different random parametres
+	insertHH=01						//---run with somatic spiking
+	insertHHdend=0					//---run with dendritic fast (Na/K) spiking
+	layer5dend1=0					//---distribute on just one dendrite (only with a layer 5 cell)
+	Voff_glutamate=0				//---0: voltage dependent; 1: independent NMDARs
+	countRS=20						//---random seed
+	randomseed=1					//---random seed					
+	
+	//---noise parameters
+	Input_NOISE_type=0				//---0: no noise; 1: stochastic noise; 2: classification errors (DS); 3: binary classification errors
+	proc SetNoise(){
+		Input_AM=(Input_NOISE_type==1)*1.5		//---stocastic noise (variance)
+		Input_DM=(Input_NOISE_type==2)*45		//---directionla modulation (degrees)
+		Input_CE=(Input_NOISE_type==3)*15		//---classification errors(%)		
+	}	
+	SetNoise()	
+
+	//---presynaptic input parameters
+	Sim_Global=0					//---0: focal distribution on a dendrite; 1: global distribution over the entire cell
+	Sim_Bias=0						//---use background bias
+	Sim_Global_L1=Sim_Global		//---focal (0) or global (1) distribution of the fist layer in a network simulation
+	proc SetNumberSyn(){	
+		Input_numberFocalSynapses=8*(Sim_Global==0)-2*(CellNum-1)		//---# focal synapses
+		if(layer5dend1*(CellNum==2)){Input_numberFocalSynapses=30}
+		Input_numberGlobalSynapses=Sim_Global*(200)						//---# global synapses
+		if(Voff_glutamate) {
+			Input_numberFocalSynapses=100*(Sim_Global==0)
+			Input_numberGlobalSynapses=100*Sim_Global
+		}
+		Input_numberDend=1*(CellNum==1)+(CellNum==2)*(5*(layer5dend1==0)+layer5dend1)	//---number of activated dendrites
+		Input_biasnumberSynapses=Sim_Bias*400							//---# excitatory bias synapses
+		Input_biasGABAnumberSynapses=Sim_Bias*CellNum*400/5				//---# inhibitory bias synapses
+		Input_biasnumberSynapsesCV=0									//---CV of bias synapses
+		//---do not belong here, but need to be updated
+		Input_gNMDAmaxG=Voff_glutamate	//---NMDAR condictance for global (only for voltage independent simulations)
+		Input_Background=250*(1+3*Voff_glutamate)//---signal background firing rate (ms)
+
+	}
+	SetNumberSyn()
+	//---objects
+	objref RandObj,SynList,NetList,NetConList,RanList,NetEventList,BiasList,NetBiasList,NetBiasConList,RanBiasList,RanBackgroundList,NetBackgroundList,NetBackgroundConList
+	SynList=new List()
+	BiasList=new List()
+	NetList=new List()
+	NetConList=new List()
+	RanList=new List()
+	RanBiasList=new List()
+	RanBackgroundList=new List()
+	NetEventList=new List()	
+	NetBiasList=new List()
+	RandObj=new Random()	
+	RandObj.ACG(0)	
+
+	//----------***read APs from file
+	/*
+	LayerNum=1
+	Sim_Read_File=LayerNum>1
+	strdef outintfilename,GF,filename,Read_File_st,filename_1
+	GF="F"
+	if(Sim_Global){GF="G"}
+	if(insertHH==0){sprint(GF,"%ssub",GF)}
+	Read_File_st="F"//previous generation
+	if(Sim_Global_L1){Read_File_st="G"}
+	outintfilename=""
+	*/
+	//---input tuning curve
+	Input_Width=90					//---width of directional tuning of the input
+	Input_WidthSD=0					//S.D. of width
+	Input_Exp=4						//---exponent of: https://en.wikipedia.org/wiki/Generalized_normal_distribution
+	Input_AngleInitSD=045			//---S.D of PD distribution for presynaptic inputs
+	Input_Number=4					//---mean number of presynaptic inputs in a preferred signal	
+	Input_DSI=0.5					//---1-ND/PD (null/preferred)
+	Input_DSIsd=0					//---S.D. of DSI
+
+	Input_Angle=0					//---direction of the stimulus. 0: ND; 180: PD
+
+	//---synaptic conductance
+	Input_gNMDAmaxF=1				//---NMDAR condictance for focal
+	Input_gAMPAmax=1				//---AMPAR condictance
+	Input_biasgNMDAmax=0			//---NMDAR condictance for background
+	Input_biasgAMPAmax=1			//---AMPAR condictance for background
+	Input_biasgGABAmax=1			//---GABAA condictance for background
+	//---synaptic timing
+	Input_Center=200+100*Sim_Bias	//---signal start time
+	Input_Interval=15				//---signal activation rate (ms)			
+	Input_biasISI=100				//---background activation rate (ms)
+	Input_Noise=1					//---NEURON noise function
+	Input_Noise_Background=1		//---NEURON noise function	
+	
+	Input_PreCells=1000				//---# total possible presynptic cells
+	Input_biasNoise=0.5
+	Noiser_Level=10
+	tau_ampa_glutamate=1			//---decay time constant
+	tau2_glutamate=2				//---activation time constant
+	tau1_glutamate=100				//---decay time constant
+	Pr_glutamate=1					//---p release
+
+	//---active (voltage gated) parameters
+	na_s=0.2+(CellNum==2)*0.1
+	k_s=0.03+(CellNum==2)*.05	
+	km_s=0.001+(CellNum==2)*.0005	
+	na_d=0.005	
+	k_d=0.001	
+	km_d=0	
+	vshift_HH=-8
+	NF_HH=1
+	//---passive
+	rpas=10000	
+	epas=-60
+	
+	countR=0
+	//****OTHER OBJECTS and VARIABLES
+	
+	objref syn,pre,ncl,nr,outinFile
+	countR=1
+	
+	double Dend_List[6]
+	objref dendV[6]
+	if(CellNum==1){				//---layer 2/3
+		Dend_List[0]=25
+		Dend_List[1]=19
+		Dend_List[2]=12
+		Dend_List[3]=2
+		Dend_List[4]=7
+		Dend_List[5]=8		
+	}
+
+	if(CellNum==2){
+		Dend_List[0]=29			//---layer 5
+		Dend_List[1]=14
+		Dend_List[2]=37
+		Dend_List[3]=56
+		Dend_List[4]=71
+		Dend_List[5]=4
+	}
+	if(layer5dend1){Dend_List[0]=10}
+	
+	for i=0,5{
+		dendV[i]=new Vector()
+		dendV[i].record(&cell.dend[Dend_List[i]].v(0.9))
+		if(insertHHdend){
+			access cell.dend[Dend_List[i]]
+			insert HH
+			gnabar_HH=0
+			gkbar_HH=0
+			gkmbar_HH=0				
+		}		
+	}
+	if(insertHH){
+		access cell.soma
+		insert HH
+		gnabar_HH=0
+		gkbar_HH=0
+		gkmbar_HH=0	
+	}
+	forall {	
+		insert pas
+		nseg=7
+	}
+
+	
+	//---placeses synaptic inputs +/- random noise
+	objref outinVecList,outinVec,outinSynList,outinSyn,outinMat,tuning
+	objref swapvec,noisefreevec,noisefreevecD,orthogonalvec,tuningD,noisefreevecTest
+
+	//---synaptic placement+assigns netstim object for each synapse 
+	proc PlaceSynFull(){
+		length=0
+		forsec cell.dends{length+=L}
+		//for numsyn=1,Input_numberSynapses{
+		for numsyn=1,Input_numberGlobalSynapses{
+			newloc=RandObj.uniform(0,length)// pick global location at random
+			newpos=RandObj.uniform(0,1)
+			length=0	
+			forsec cell.dends{
+				if( (length<=newloc)&&(length+L>=newloc)){		//put synapse
+					SynList.append(new glutamate(newpos))
+					SynList.o(SynList.count()-1).locx=x3d(int(n3d()*newpos))
+					SynList.o(SynList.count()-1).locy=y3d(int(n3d()*newpos))
+				}
+				length+=L
+			}
+		}
+	}
+	//---dendritic synaptic placement+assigns netstim object for each synapse 
+	proc PlaceSynDend(){
+		if(layer5dend1==0){
+			for dend=0,Input_numberDend-1{
+				for numsyn=1,Input_numberFocalSynapses{
+					dendnum=dend
+					access cell.dend[Dend_List[dendnum]]
+					newpos=RandObj.uniform(0.7,1)
+					newpos=RandObj.uniform(0.5,1)
+					SynList.append(new glutamate(newpos))
+					SynList.o(SynList.count()-1).locx=x3d(int(n3d()*newpos))
+					SynList.o(SynList.count()-1).locy=y3d(int(n3d()*newpos))
+				}
+			}
+		}else{
+			access cell.dend[Dend_List[0]]
+			for numsyn=1,Input_numberFocalSynapses{
+				SynList.append(new glutamate(.7))
+				SynList.o(SynList.count()-1).locx=x3d(int(n3d()*newpos))
+				SynList.o(SynList.count()-1).locy=y3d(int(n3d()*newpos))
+			}
+		}
+	}
+	
+	//---distributes synapses either locally or globally
+	objref biasdends
+	double noBiasList[5]
+	noBiasList[0]=25
+	noBiasList[1]=24
+	noBiasList[2]=23
+	noBiasList[3]=17
+	noBiasList[4]=16
+	
+	objref BiasRandObj
+	proc PlaceSyn(){
+		SynList=new List()
+		BiasList=new List()
+		NetList=new List()
+		NetConList=new List()
+		BiasRandObj=new Random(countRS)
+		Input_numberGlobalSynapsesS=Input_numberGlobalSynapses	
+		Input_numberFocalSynapsesS=Input_numberFocalSynapses		
+		PlaceSynDend()		
+		PlaceSynFull()		
+		Input_numberGlobalSynapses=Input_numberGlobalSynapsesS
+		Input_numberFocalSynapses=Input_numberFocalSynapsesS
+		biasdends=new SectionList()
+		forsec cell.all{
+			biasdends.append()
+		}
+		for i=0,4{
+			access cell.dend[noBiasList[i]]
+			biasdends.remove()
+		}
+		length=0
+		forsec biasdends{length+=L}
+		VarSyn=int(BiasRandObj.normal(Input_biasnumberSynapses,(Input_biasnumberSynapses*Input_biasnumberSynapsesCV)^2))
+		for numsyn=1,Input_biasGABAnumberSynapses+VarSyn{
+			newloc=BiasRandObj.uniform(0,length)// pick global location at random
+			newpos=BiasRandObj.uniform(0,1)
+			length=0	
+			forsec biasdends{
+				if( (length<=newloc)&&(length+L>=newloc)){		//put synapse
+					if(numsyn<=VarSyn){
+						BiasList.append(new glutamate(newpos))
+						BiasList.o(BiasList.count()-1).dend=0
+					}else{
+						BiasList.append(new gabaA(newpos))
+						BiasList.o(BiasList.count()-1).dend=1
+					}
+					BiasList.o(BiasList.count()-1).locx=x3d(int(n3d()*newpos))
+					BiasList.o(BiasList.count()-1).locy=y3d(int(n3d()*newpos))
+				}
+				length+=L
+			}
+		}
+	}
+	PlaceSyn()
+	access cell.soma
+	objref f1,somav,f2,caDend,fSpike
+	somav=new Vector()
+	somav.record(&cell.soma.v(0.5))
+
+	objref somaAP,netcon,nil						
+	somaAP=new Vector()						
+	netcon=new NetCon(&cell.soma.v(0.5),nil)         //AP count	
+	netcon.record(somaAP)						
+	netcon.threshold=-10
+
+	Sim_Read_File=0
+	
+	objref gVmain
+	gVmain=new Graph(0)
+	gVmain.view(0,-60,tstop,60,950,280,500,230) 
+	gVmain.addexpr("cell.soma.v(0.5)",1,1)
+	for i=0,(Input_numberDend-1){
+		strdef st
+		sprint(st,"cell.dend[%d].v(0.5)",Dend_List[i])
+		gVmain.addexpr(st,9,1)
+	}
+	graphList[0].append(gVmain)
+	gVmain = new PlotShape(0)
+	gVmain.size(-173.946,185.946,-89.5612,270.331)
+	gVmain.variable("v")
+	gVmain.view(-173.946, -89.5612, 359.892, 359.892, 187, 187, 200.7, 200.8)
+	fast_flush_list.append(gVmain)
+	gVmain.save_name("fast_flush_list.")
+	
+	
+	proc init_plots_panels(){//PLOTS
+		//objref ginputs,shape,INreptimes,gSPIKE
+		xpanel("Input")
+			//---# synapses
+			xlabel("Signal synapses")
+			xbutton("Focal Synapses","Sim_Global=0 SetNumberSyn()  PlaceSyn() Update()")
+			xvalue("# Focal Synapses","Input_numberFocalSynapses", 1," PlaceSyn() Update()")
+			xbutton("Global Synapses","Sim_Global=1 SetNumberSyn()  PlaceSyn() Update()")
+			xvalue("# Global Synapses","Input_numberGlobalSynapses", 1,"  PlaceSyn() Update()")
+			// xcheckbox("Voltage independent NMDAR",&Voff_glutamate,"SetNumberSyn() PlaceSyn() Update()")
+			xlabel("Background synapses")
+			xvalue("# bias Synapses","Input_biasnumberSynapses", 1,"  PlaceSyn()  Update()")
+			xvalue("# bias GABA Synapses","Input_biasGABAnumberSynapses", 1,"  PlaceSyn()  Update()")
+			//---stimulation
+			xbutton("Preferred signal","Input_Angle=180 Update()")
+			xbutton("Null signal","Input_Angle=0 Update()")
+			xvalue("Stimulation angle","Input_Angle", 1,"Update()")
+			//---noise
+			xlabel("Noise")
+			xvalue("Stochastic noise","Input_AM", 1,"Update()")
+			xbutton("Preset=1.5","Input_AM=1.5")
+			xvalue("Classification errors (degrees, DS)","Input_DM", 1,"Update()")
+			xbutton("Preset=45","Input_DM=45")
+			xvalue("Classification errors (%)","Input_CE", 1,"Update()")
+			xbutton("Preset=15","Input_CE=15")
+		xpanel(140,500)
+		xpanel("RUN")
+			xvalue("Init","v_init", 1,"stdinit()", 1, 1 )
+			xbutton("Init & Run","Update() run()")
+			xbutton("Stop","stoprun=1")
+			xvalue("Tstop","tstop", 1,"tstop_changed()", 0, 1 )		
+		xpanel(540,500)
+		// xpanel("PARAMETERS")
+			// xlabel("Active Params")
+			// xvalue("Na Soma","na_s", 1,"Update()")
+			// xvalue("K Soma","k_s", 1,"Update()")
+			// xvalue("Km Soma","km_s", 1,"Update()")
+			// xvalue("Na Dend","na_d", 1,"Update()")
+			// xvalue("K Dend","k_d", 1,"Update()")
+			// xvalue("Km Dend","km_d", 1,"Update()")
+			// xvalue("V Shift","vshift_HH", 1,"Update()")
+			// xvalue("R Passive","rpas", 1,"Update()")
+			// xvalue("E Passive","epas", 1,"Update()")
+			// xvalue("Noise","NF_HH", 1,"")					
+		// xpanel(360,10)
+
+	}
+	init_plots_panels()
+
+	
+	

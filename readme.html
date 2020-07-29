@@ -1,0 +1,74 @@
+<html>
+This is the readme for the models associated with the paper:
+<p/>
+Poleg-Polsky A (2019) Dendritic spikes expand the range of
+well-tolerated population noise structures. J Neurosci
+<br/>
+<a href="https://doi.org/10.1523/JNEUROSCI.0638-19.2019">https://doi.org/10.1523/JNEUROSCI.0638-19.2019</a>
+</p>
+<p>This code was contributed by A Poleg-Polsky. These models provide a
+comparison between processing of noisy inputs in dendritic subunits
+  and whole-cell synaptic integration.
+</p>
+To run the NEURON model, compile the mod files and start with mosinit.hoc. If you need more
+help please consult the page:<p/>
+<a href="https://senselab.med.yale.edu/ModelDB/NEURON_DwnldGuide.cshtml">
+  https://senselab.med.yale.edu/ModelDB/NEURON_DwnldGuide.cshtml</a>
+<p>Simulated cortical cells (pyramidal layer 2/3 or pyramidal layer 5)
+are assumed to be innervated by inputs from a presynaptic population
+that increases its firing rate when presented with a preferred
+stimulus. In the focal synaptic distribution active synapses on the
+postsynaptic cell are mapped to an individual dendritic branch in
+layer 2/3 simulation or 5 branches in the case of a layer 5 cell. In
+the global synaptic distribution all synapses are placed randomly
+across the dendritic arbor.
+</p>
+<p>The simulation includes population noise, which modifies the number of
+spikes elicited by each presynaptic cell. There are two main noise
+structures in the simulation. The first noise samples from a Gaussian
+distribution (noise intensity if set by Fano factor (variance/mean);
+set by the 'stochastic noise' variable). The second noise structure
+introduces classification errors. In the case of classification errors
+(%) the stimulus is assumed to represent a binary choice
+(preferred/null) and a small percentage of inputs respond to the
+opposite stimulus. With classification errors (degrees, DS) the input
+population is assumed to encode stimulus direction and the trial-trial
+variability arises from shifts in the encoded direction. In this
+scenario, the classification error represents the width of a normal
+distribution of input directions that is sampled by the cells in the
+population. In the case of only two possible directions, directional
+classification errors are equivalent to the binary choice
+classification errors.
+</p>
+<p>Figure 1: Top, example focal activation of 8 synapses on a dendrite of
+a layer 2/3 cell  (Click "Layer 2/3") (black, soma; grey, active dendrite) during the
+  preferred (left)  (Click "Preferred signal", "Init & Run") and null (right) stimuli (Click "Null signal", "Init & Run").
+  Bottom, 10 superimposed
+traces of responses to the preferred (left) and null (right) stimuli (You can use the graph pop-up menu -> "Keep Lines").
+</p>
+<img src="./images/screenshot1.png"><img src="./images/screenshot2.png"><br/>
+<img src="./images/screenshot3.png"><img src="./images/screenshot4.png"><br/>
+<p>Figure 2: Example focal activation of 200 of passive (AMPA only)
+synapses on a layer 2/3 cell (black, soma; grey, same dendrite as on
+Figure 1) in the preferred (left) and null (right) directions
+</p>
+<img src="./images/screenshot5.png"><img src="./images/screenshot6.png"><br/>
+
+<p>Figure 3: Stochastic (Gaussian) variability in the presynaptic
+population (Stochastic noise was set to 1.5). Top, dendritic focal
+stimulation, boron, global activation. Left - Preferred, right-null
+stimuli. Note the errors in postsynaptic responses following dendritic
+subunit activation that are evident from spiking to null and no
+spiking to preferred stimuli.
+</p>
+<img src="./images/screenshot7.png"><img src="./images/screenshot8.png"><br/>
+<img src="./images/screenshot9.png"><img src="./images/screenshot10.png"><br/>
+<p>Figure 4: Same as Fig. 3 with classification errors (15%) produce
+accurate responses in the dendritic units (top) but lead to
+significant decrease in the number of action potentials elicited for
+the preferred direction (bottom left) and some increase in the number
+of spikes to the null stimulation (bottom, right) for global synaptic
+distribution.</p>
+<img src="./images/screenshot11.png"><img src="./images/screenshot12.png"><br/>
+<img src="./images/screenshot13.png"><img src="./images/screenshot14.png"><br/>
+</html>

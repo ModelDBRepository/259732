@@ -1,0 +1,25 @@
+	load_file("nrngui.hoc")	
+	CellNum=1
+	xpanel("Select cell type",1)
+		xlabel("Select cell type")
+		xbutton("Layer 2/3","CellNum=1 StartSimulation()")
+		xbutton("Layer 5","CellNum=2 StartSimulation()")
+	xpanel(20,100)
+	
+	objref cell	//---this will be layer 2/3 or layer 5 cell
+
+	proc StartSimulation(){
+		//---load help files
+	
+		if(CellNum==1){
+			load_file("layer_2_3.hoc")	// The morphology to use			
+		}
+		if(CellNum==2){
+			load_file("layer_5.hoc")	// The morphology to use			
+		}
+		
+		load_file("functions.hoc")	
+		load_file("DSgeneration.hoc")			
+		//load_file("utilities.hoc")			
+		//load_file("simulation.ses")	
+	}

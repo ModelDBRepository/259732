@@ -1,0 +1,188 @@
+	
+	//----updates the active parameters
+	proc Update_Active(){
+		forall {
+			g_pas=1/rpas
+			e_pas=epas
+		}
+		if(insertHHdend){
+			for i=0,Input_numberDend-1{
+				access cell.dend[Dend_List[i]]
+				gnabar_HH=na_d
+				gkbar_HH=k_d
+				gkmbar_HH=km_d	
+			}
+		}		
+		if(insertHH==1){
+			access cell.soma
+			gnabar_HH=na_s
+			gkbar_HH=k_s
+			gkmbar_HH=km_s	
+			seed_HH	=seed_HH+1
+		}
+	}
+	objref BiasTimeVec[2],BiasRandObj
+	//---updates the bias inputs
+	proc Update_Bias(){
+		if(BiasList.count()>0){
+			objref BiasTimeVec[BiasList.count()]
+			objref BiasRandObj
+			BiasRandObj=new Random(countRS+30)
+			for i=0,BiasList.count()-1{							//---updates bias inputs
+				if(BiasList.o(i).dend==0){						//---glutamatergic
+					BiasList.o(i).gNMDAmax=Input_biasgNMDAmax
+					BiasList.o(i).gAMPAmax=Input_biasgAMPAmax
+				}else{
+					BiasList.o(i).gmax=Input_biasgGABAmax		//---gabaergic
+				}
+				BiasTimeVec[i]=new Vector(tstop)
+				BiasTimeVec[i].fill(0)
+				for biasStim=0,tstop/Input_biasISI{
+					BiasTimeVec[i].x[BiasRandObj.uniform(0,tstop)]=1
+				}
+				BiasTimeVec[i].play(&BiasList.o(i).stim,1)
+			}	
+		}		
+	}	
+	
+	objref DStuningTable,DStuningAMP,DStuningPD,DStuningDSI,DStuningWIDTH,DStuningTableDer,tuningDer,noiseVec,noiseVecDer,noiseVecPD,noiseVecAM
+	//---generates DS tuning of presynaptic cells
+	proc Update_DStuningTable(){//selects new values for DS input
+		RandObj.ACG($1)
+		Num_Inputs=Input_PreCells
+		DStuningTable=new Matrix(361,Num_Inputs)
+		DStuningTableDer=new Matrix(360,Num_Inputs)
+		DStuningAMP=new Vector(Num_Inputs)			//---amplitude
+		DStuningPD=new Vector(Num_Inputs)			//---angle
+		DStuningDSI=new Vector(Num_Inputs)			//---DSI
+		DStuningWIDTH=new Vector(Num_Inputs)		//---DSI
+		noiseVecAM=new Vector(Num_Inputs)			//---DSI
+		tuning=new Vector(361)						//---angle	
+		tuningDer=new Vector(360)					//---derivative
+		for InputNum=0,Input_PreCells-1{
+			DStuningPD.x[InputNum]=RandObj.normal(0,Input_AngleInitSD^2)
+			DStuningAMP.x[InputNum]=RandObj.normal(Input_Number,Input_Number*0)//poisson distribution of input strengths
+			DStuningAMP.x[InputNum]*=exp(-(DStuningPD.x[InputNum])^2/45^2)//non PD smaller//60
+			if(DStuningAMP.x[InputNum]<0){DStuningAMP.x[InputNum]=0}//no negative AMP	
+			DStuningDSI.x[InputNum]=RandObj.normal(Input_DSI,Input_DSIsd^2)// distribution of input DSI
+			if(DStuningDSI.x[InputNum]<0){DStuningDSI.x[InputNum]=0}
+			if(DStuningDSI.x[InputNum]>1){DStuningDSI.x[InputNum]=1}
+			DStuningWIDTH.x[InputNum]=RandObj.normal(Input_Width,Input_WidthSD^2)// distribution of input DSI
+			for Tang=0,360{
+				tuning.x[Tang]=1-DStuningDSI.x[InputNum]+(DStuningDSI.x[InputNum])*exp( -(180-Tang)^Input_Exp/(DStuningWIDTH.x[InputNum])^Input_Exp )//number of inputs as a function of the tuning curve						
+			}
+			tuning.rotate(DStuningPD.x[InputNum])	
+			tuningDer.deriv(tuning, 1)
+
+			for Tang=0,360{
+				DStuningTable.x[Tang][InputNum]=tuning.x[Tang]//*DStuningAMP.x[InputNum]
+			}
+			for Tang=0,360-1{
+				DStuningTableDer.x[Tang][InputNum]=tuningDer.x[Tang]//*DStuningAMP.x[InputNum]
+			}	
+		}
+	}
+	Update_DStuningTable(randomseed)
+
+	Input_Corr_NumDeg=20
+	Input_Corr_Spread=45
+	//----the main update function
+	objref TimeVec[2],StimTimeVec[2],SynStim,VecStim,RandStim,netconStim,Noiser
+	proc Update(){							//---updates active parameters
+		Update_Active()	
+		NetBiasList=new List()
+		NetBackgroundList=new List()
+		NetList=new List()
+		NetConList=new List()
+		RanList=new List()
+		RanBiasList=new List()
+		NetEventList=new List()	
+		NetBiasConList=new List()
+		NetBackgroundConList=new List()		
+		countR+=1
+		Noiser=new Random(countR)
+		Update_Bias(countR)
+		Num_Inputs=SynList.count()
+		noiseVec=new Vector(Num_Inputs)
+		noiseVecPD=new Vector(Num_Inputs)
+		noiseVec.fill(0)
+		noiseVecPD.fill(0)
+		if(Num_Inputs>0){
+			for InputNum=0,Num_Inputs-1{				//---over all inputs
+				noiseVecPD.x[InputNum]+=Input_Angle+RandObj.normal(0,Input_DM^2)//DM noise shifts directional tuning
+				if(RandObj.uniform(0,100)<Input_CE){noiseVecPD.x[InputNum]+=180}	//classification errors point to the opposite direction
+				while(noiseVecPD.x[InputNum]>=360){noiseVecPD.x[InputNum]-=(noiseVecPD.x[InputNum]>=360)*360}
+				while(noiseVecPD.x[InputNum]<0){noiseVecPD.x[InputNum]+=(noiseVecPD.x[InputNum]<0)*360}
+				baseTuning=DStuningTable.x[noiseVecPD.x[InputNum]][InputNum]*DStuningAMP.x[InputNum]
+				noiseVecAM.x[InputNum]=RandObj.normal(baseTuning,baseTuning*Input_AM)
+				noiseVec.x[InputNum]=noiseVecAM.x[InputNum]
+			}
+	
+			mean_spike=0
+			objref TimeVec[Num_Inputs],StimTimeVec[Num_Inputs]
+			for i=0,Num_Inputs-1{						//---update synaptic parameters and netstim objects
+				RandStim=new Random(i+1+countRS)				
+				TimeVec[i]=new Vector(1000)
+				StimTimeVec[i]=new Vector(1000)				
+				TimeVec[i].fill(0)
+				StimTimeVec[i].fill(0)
+				//---background
+				if(Input_Background>0){
+					for back=0,1000/Input_Background {
+						timing=(1-Input_Noise_Background)*Input_Background*back+Input_Noise_Background*(RandStim.negexp(Input_Background*Input_Noise_Background)*back)+RandStim.uniform(0,Input_Background*Input_Noise_Background)
+						//timing=abs(RandStim.normal(back*Input_Background,(Input_Background^2)*Input_Noise_Background))
+						timing+=Noiser.normal(0,Noiser_Level)
+						if((timing>=0)&&(timing<TimeVec.size()-1)){TimeVec[i].x[int(timing)]=1}
+					}
+				}
+				//---stimulus					
+				if (Sim_Read_File==0){					//---generate input waves				
+					if(noiseVec.x[i]>=0){
+						counter=0
+						for stim=1,int(noiseVec.x[i]+.49){
+							timing=Input_Center+(1-Input_Noise)*Input_Interval*counter+Input_Noise*RandStim.negexp(Input_Interval*Input_Noise)*counter
+							timing+=Noiser.normal(0,Noiser_Level)
+							if((timing<TimeVec.size()-1)&&(timing>0)){
+								StimTimeVec[i].x[int(timing)]=1
+								TimeVec[i].x[int(timing)]=1
+							}
+							counter+=1
+						}	
+					}else{						
+						for stim=0,abs(int(noiseVec.x[i]*2)){
+							countSyn=0
+							for tt=Input_Center,Input_Center+100{
+								countSyn+=TimeVec[i].x[tt]
+							}
+							if(countSyn>0){
+								removeSyn=int(RandObj.uniform(0,countSyn))
+							}
+							countSyn=0
+							for tt=Input_Center,Input_Center+100{
+								if(TimeVec[i].x[tt]){
+									if(countSyn==removeSyn){
+										TimeVec[i].x[tt]=0
+										StimTimeVec[i].x[tt]=0							
+									}
+									countSyn+=1
+								}
+							}						
+						}
+						
+					}
+				}else{//load prev generation
+					StimTimeVec[i]=outinMat.getrow(int(RandObj.uniform(0,outinMat.nrow)))
+					for tt=0,StimTimeVec[i].size()-1{
+						if(StimTimeVec[i].x[tt]){TimeVec[i].x[tt]=1}
+					}
+				}
+				mean_spike+=StimTimeVec[i].sum()
+				TimeVec[i].play(&SynList.o(i).stim,1)
+				SynList.o(i).gNMDAmax=Input_gNMDAmaxF*(i<(Input_numberFocalSynapses*Input_numberDend))+Input_gNMDAmaxG*(i>=(Input_numberFocalSynapses*Input_numberDend))
+				SynList.o(i).gAMPAmax=Input_gAMPAmax	//RandStim.lognormal(Input_gAMPAmax,Input_gAMPAmax)//Input_gAMPAmax			
+			}
+		}
+	}
+	Update()
+	
+	 
